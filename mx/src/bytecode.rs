@@ -24,17 +24,11 @@ struct StackFrame {
 
 struct State {
     pc: usize,
+    globals: Vars,
     stack_frames: Vec<StackFrame>,
 }
 
 impl State {
-    fn new() -> Self {
-        State {
-            pc: 0,
-            stack_frames: Vec::new(),
-        }
-    }
-
     fn incr_pc(&mut self) {
         self.pc += 1;
     }
@@ -71,12 +65,13 @@ impl State {
             .ok_or(RuntimeError::EmptyStack)
     }
 
-    fn get_var(&mut self, name: &str) -> Result<Value, RuntimeError> {
+    fn get_var(&self, name: &str) -> Result<Value, RuntimeError> {
         self.stack_frames
             .iter()
             .rev()
             .find_map(|frame| frame.locals.get(name))
             .cloned()
+            .or(self.globals.get(name).cloned())
             .ok_or(RuntimeError::InvalidVariable)
     }
 
@@ -108,12 +103,12 @@ enum Instruction {
     /// `var[TOS] = const`
     StorePrimitive(Primitive),
 
-    /// TOS = var[TOS]
+    /// `TOS = var[TOS]`
     PushName,
     /// Push the given constant onto the stack.
     PushPrimitive(Primitive),
 
-    /// TOS = TOS1[TOS]
+    /// `TOS = TOS1[TOS]`
     TableGet,
     TableListBuild(usize),
     TableDictBuild(usize),
@@ -131,6 +126,18 @@ enum Instruction {
     Call,
     /// return TOS
     Return,
+}
+
+impl From<UnaryOp> for Instruction {
+    fn from(op: UnaryOp) -> Self {
+        Instruction::UnaryOp(op)
+    }
+}
+
+impl From<BinaryOp> for Instruction {
+    fn from(op: BinaryOp) -> Self {
+        Instruction::BinaryOp(op)
+    }
 }
 
 impl Instruction {
@@ -183,14 +190,14 @@ impl Instruction {
             }
             TableGet => {
                 state.incr_pc();
-                let key = state.pop_stack()?;
+                let key = state
+                    .pop_stack()?
+                    .get_primitive()
+                    .ok_or(RuntimeError::InvalidTableKey)?;
                 let tos = state.peek_stack()?;
                 match tos {
                     Value::Table(table) => {
-                        let value = table
-                            .get(key.try_into().map_err(|_| RuntimeError::InvalidVariable)?)
-                            .cloned()
-                            .unwrap_or(Value::nil());
+                        let value = table.get(key).cloned().unwrap_or(Value::nil());
                         state.push_stack(value)?;
                         Ok(false)
                     }
@@ -202,33 +209,36 @@ impl Instruction {
                 let mut table = Table::new();
                 for i in 0..*n {
                     let value = state.pop_stack()?;
-                    table.set(i, value);
+                    let key = n - i - 1;
+                    table.set(key, value);
                 }
+                state.push_stack(table.into())?;
                 Ok(false)
             }
             TableDictBuild(n) => {
                 state.incr_pc();
                 let mut table = Table::new();
                 for _ in 0..*n {
+                    let value = state.pop_stack()?;
                     let key = state
                         .pop_stack()?
-                        .try_into()
-                        .map_err(|_| RuntimeError::InvalidTableKey)?;
-                    let value = state.pop_stack()?;
+                        .get_primitive()
+                        .ok_or(RuntimeError::InvalidTableKey)?;
                     table.set(key, value);
                 }
+                state.push_stack(table.into())?;
                 Ok(false)
             }
             TableMerge => {
                 state.incr_pc();
                 let tos: Table = state
                     .pop_stack()?
-                    .try_into()
-                    .map_err(|_| RuntimeError::NotATable)?;
+                    .get_table()
+                    .ok_or(RuntimeError::NotATable)?;
                 let mut tos1: Table = state
                     .pop_stack()?
-                    .try_into()
-                    .map_err(|_| RuntimeError::NotATable)?;
+                    .get_table()
+                    .ok_or(RuntimeError::NotATable)?;
 
                 for (key, value) in tos {
                     tos1.set(key, value);
@@ -279,8 +289,9 @@ impl Program {
     pub fn run_with(&self, globals: Vars) -> Result<Value, RuntimeError> {
         let mut state = State {
             pc: 0,
+            globals,
             stack_frames: vec![StackFrame {
-                locals: globals,
+                locals: HashMap::new(),
                 stack: Vec::new(),
             }],
         };
@@ -308,27 +319,88 @@ impl Program {
 mod test {
     use super::Instruction::*;
     use super::*;
+    use crate::table;
+
+    macro_rules! state {
+        (
+            $(globals => {$($gk:expr => $gv:expr),* $(,)?})?
+            $(locals  => {$($lk:expr => $lv:expr),* $(,)?})?
+            $(stack   => [$($sv:expr),*             $(,)?])?
+        ) => {
+            State {
+                pc: 0,
+                globals: state!(Vars => {$($($gk => $gv),*)*}),
+                stack_frames: vec![StackFrame {
+                    locals: state!(Vars => {$($($lk => $lv),*)*}),
+                    stack: vec![$($($sv.into()),*)*],
+                }],
+            }
+        };
+        (Vars => {$($k:expr => $v:expr),* $(,)?}) => {
+            {
+                #[allow(unused_mut)]
+                let mut vars: Vars = HashMap::new();
+                $(vars.insert($k.to_string(), $v.into());)*
+                vars
+            }
+        };
+    }
+
+    #[test]
+    fn test_get_name_from_globals() {
+        let state = state!(
+            globals => {
+                "x" => 1,
+                "y" => 2,
+            }
+        );
+
+        assert_eq!(state.get_var("x").unwrap(), 1.into());
+        assert_eq!(state.get_var("y").unwrap(), 2.into());
+    }
+
+    #[test]
+    fn test_get_name_from_locals() {
+        let state = state!(
+            locals => {
+                "x" => 1,
+                "y" => 2,
+            }
+        );
+
+        assert_eq!(state.get_var("x").unwrap(), 1.into());
+        assert_eq!(state.get_var("y").unwrap(), 2.into());
+    }
+
+    #[test]
+    fn test_get_name_from_locals_before_globals() {
+        let state = state!(
+            globals => {
+                "x" => 0,
+                "y" => 0,
+            }
+            locals => {
+                "x" => 1,
+                "y" => 2,
+            }
+        );
+
+        assert_eq!(state.get_var("x").unwrap(), 1.into());
+        assert_eq!(state.get_var("y").unwrap(), 2.into());
+    }
 
     #[test]
     fn test_nop() {
-        let mut state = State {
-            pc: 0,
-            stack_frames: Vec::new(),
-        };
-
+        let mut state = state!();
         assert_eq!(Nop.eval(&mut state).unwrap(), false);
         assert_eq!(state.pc, 1);
     }
 
     #[test]
     fn test_copy() {
-        let mut state = State {
-            pc: 0,
-            stack_frames: vec![StackFrame {
-                locals: HashMap::new(),
-                stack: vec![1.into()],
-            }],
-        };
+        let mut state = state!(
+            stack => [1]
+        );
 
         assert_eq!(Copy.eval(&mut state).unwrap(), false);
         assert_eq!(state.pc, 1);
@@ -339,6 +411,138 @@ mod test {
         assert_eq!(
             state.stack_frames[0].stack[1].clone().get_primitive(),
             Some(1.into())
+        );
+    }
+
+    #[test]
+    fn test_store_name() {
+        let mut state = state!(
+            globals => { "x" => 0 }
+            locals => { "x" => 1 }
+            stack => ["x", 2]
+        );
+
+        assert_eq!(StoreName.eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 0);
+        assert_eq!(state.stack_frames[0].locals.len(), 1);
+        assert_eq!(state.stack_frames[0].locals.get("x").unwrap(), &2.into());
+    }
+
+    #[test]
+    fn test_store_primitive() {
+        let mut state = state!(
+            globals => { "x" => 0 }
+            locals => { "x" => 1 }
+            stack => ["x"]
+        );
+
+        assert_eq!(StorePrimitive(2.into()).eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 0);
+        assert_eq!(state.stack_frames[0].locals.len(), 1);
+        assert_eq!(state.stack_frames[0].locals.get("x").unwrap(), &2.into());
+    }
+
+    #[test]
+    fn test_push_name() {
+        let mut state = state!(
+            globals => { "x" => 0 }
+            locals => { "x" => 1 }
+            stack => ["x"]
+        );
+
+        assert_eq!(PushName.eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 1);
+        assert_eq!(state.stack_frames[0].stack[0], 1.into());
+    }
+
+    #[test]
+    fn test_push_primitive() {
+        let mut state = state!(
+            globals => { "x" => 0 }
+            locals => { "x" => 1 }
+            stack => []
+        );
+
+        assert_eq!(PushPrimitive(2.into()).eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 1);
+        assert_eq!(state.stack_frames[0].stack[0], 2.into());
+    }
+
+    #[test]
+    fn test_table_get() {
+        let mut state = state!(
+            stack => [
+                table!["x" => 1],
+                "x",
+            ]
+        );
+
+        assert_eq!(TableGet.eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 2);
+        assert_eq!(state.stack_frames[0].stack[1], 1.into());
+    }
+
+    #[test]
+    fn test_table_list_build() {
+        let mut state = state!(
+            stack => [
+                1,
+                2,
+                3,
+            ]
+        );
+
+        assert_eq!(TableListBuild(3).eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 1);
+        assert_eq!(
+            state.stack_frames[0].stack[0].clone().get_table(),
+            Some(table![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn test_table_dict_build() {
+        let mut state = state!(
+            stack => [
+                "a",
+                1,
+                "b",
+                2,
+                "c",
+                3,
+            ]
+        );
+
+        assert_eq!(TableDictBuild(3).eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 1);
+        assert_eq!(
+            state.stack_frames[0].stack[0].clone().get_table(),
+            Some(table!["a" => 1, "b" => 2, "c" => 3])
+        );
+    }
+
+    #[test]
+    fn test_table_merge() {
+        let mut state = state!(
+            stack => [
+                table!["a" => 1, "b" => 2],
+                table!["b" => 3, "c" => 4],
+            ]
+        );
+
+        assert_eq!(TableMerge.eval(&mut state).unwrap(), false);
+        assert_eq!(state.pc, 1);
+        assert_eq!(state.stack_frames[0].stack.len(), 1);
+        assert_eq!(
+            state.stack_frames[0].stack[0].clone().get_table(),
+            Some(table!["a" => 1, "b" => 3, "c" => 4])
         );
     }
 }

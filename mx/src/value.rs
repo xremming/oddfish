@@ -1,6 +1,6 @@
 use crate::{Primitive, Table, Type, TypeOf};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Primitive(Primitive),
     Table(Table),

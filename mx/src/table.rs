@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    iter::Filter,
     ops::{Index, IndexMut},
 };
 
@@ -9,6 +10,8 @@ use crate::{Primitive, Value};
 macro_rules! table {
     ($($key:expr => $value:expr),* $(,)?) => {
         {
+            use crate::Table;
+            #[allow(unused_mut)]
             let mut table = Table::new();
             $(
                 table.set($key, $value);
@@ -18,11 +21,14 @@ macro_rules! table {
     };
     ($($value:expr),* $(,)?) => {
         {
+            use crate::Table;
+            #[allow(unused_mut)]
             let mut table = Table::new();
             let mut i = 0;
             $(
                 table.set(i, $value);
-                i += 1;
+                #[allow(unused_assignments)]
+                { i += 1; }
             )*
             table
         }
@@ -59,17 +65,18 @@ impl Table {
         })
     }
 
-    pub fn iter(self) -> impl Iterator<Item = (Primitive, Value)> {
-        self.into_iter()
+    pub fn iter(&self) -> impl Iterator<Item = (&Primitive, &Value)> {
+        self.0.iter().filter(|(_, v)| !v.is_nil())
     }
 }
 
 impl IntoIterator for Table {
     type Item = (Primitive, Value);
-    type IntoIter = std::collections::hash_map::IntoIter<Primitive, Value>;
+    type IntoIter =
+        Filter<std::collections::hash_map::IntoIter<Primitive, Value>, fn(&Self::Item) -> bool>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.0.into_iter().filter(|(_, v)| !v.is_nil())
     }
 }
 
@@ -97,6 +104,25 @@ impl TryFrom<Value> for Table {
         }
     }
 }
+
+impl PartialEq for Table {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().all(|(key, value)| {
+            let other_value = other.get(key.clone());
+            if value.is_nil() {
+                match other_value {
+                    Some(Value::Primitive(Primitive::Nil)) => true,
+                    None => true,
+                    _ => false,
+                }
+            } else {
+                other_value == Some(value)
+            }
+        })
+    }
+}
+
+impl Eq for Table {}
 
 impl<Idx> Index<Idx> for Table
 where
