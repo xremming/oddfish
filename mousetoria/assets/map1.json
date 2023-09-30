@@ -1,0 +1,6 @@
+{
+  "$schema": "../schemas/map.json",
+  "name": "Map 1",
+  "width": 10,
+  "height": 10
+}

@@ -1,0 +1,37 @@
+{
+  "ocean_deep": {
+    "path": "ocean_deep.png",
+    "name": "Deep Ocean",
+    "layer": "ocean"
+  },
+  "ocean_shallow": {
+    "path": "ocean_shallow.png",
+    "name": "Shallow Ocean",
+    "layer": "ocean"
+  },
+  "ocean_shore": {
+    "path": "ocean_shore.png",
+    "name": "Ocean Shore",
+    "layer": "ocean"
+  },
+  "shore": {
+    "path": "shore.png",
+    "name": "Shore",
+    "layer": "land"
+  },
+  "grass": {
+    "path": "grass.png",
+    "name": "Grass",
+    "layer": "land"
+  },
+  "forest": {
+    "path": "forest.png",
+    "name": "Forest",
+    "layer": "land"
+  },
+  "mountain": {
+    "path": "mountain.png",
+    "name": "Mountain",
+    "layer": "land"
+  }
+}
