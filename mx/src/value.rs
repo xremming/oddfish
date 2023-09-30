@@ -99,14 +99,14 @@ impl Value {
         T::try_from(self).ok()
     }
 
-    pub fn get_primitive(self) -> Option<Primitive> {
+    pub fn into_primitive(self) -> Option<Primitive> {
         match self {
             Value::Primitive(value) => Some(value),
             _ => None,
         }
     }
 
-    pub fn get_table(self) -> Option<Table> {
+    pub fn into_table(self) -> Option<Table> {
         match self {
             Value::Table(table) => Some(table),
             _ => None,

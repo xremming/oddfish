@@ -18,8 +18,6 @@ pub(crate) enum BinaryOp {
     Div,
     /// `lhs % rhs`
     Mod,
-    /// `lhs // rhs`
-    IntegerDiv,
     /// `lhs ^ rhs`
     Pow,
     /// `lhs == rhs`
@@ -35,7 +33,15 @@ pub(crate) enum BinaryOp {
     /// `lhs >= rhs`
     Gte,
     /// `lhs && rhs`
+    ///
+    /// If `lhs` is falsy, then `lhs` is returned, otherwise returns `rhs`. Short-circuits.
     And,
     /// `lhs || rhs`
+    ///
+    /// If `lhs` is truthy, then `lhs` is returned, otherwise returns `rhs`. Short-circuits.
     Or,
+    /// `lhs ?? rhs`
+    ///
+    /// If `lhs` is `nil`, then `rhs` is returned. Short-circuits.
+    NilCoalesce,
 }
