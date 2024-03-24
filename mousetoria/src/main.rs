@@ -36,7 +36,7 @@ fn update_neighbors(mut tiles_query: Query<(Entity, &Tile, &mut Neighbors)>) {
 
     tiles_query
         .par_iter_mut()
-        .for_each_mut(|(_, tile, mut neighbors)| {
+        .for_each(|(_, tile, mut neighbors)| {
             neighbors.update_neighbors((tile.x, tile.y), &tiles);
         });
 }
@@ -122,7 +122,7 @@ fn set_drag_state(
 fn drag_camera(mut query: QueryPrimaryCameraTransform, mut mouse_motion: EventReader<MouseMotion>) {
     let mut camera = query.single_mut();
 
-    for event in mouse_motion.iter() {
+    for event in mouse_motion.read() {
         let translation = {
             let mut v = event.delta.extend(0.0);
             v.x *= -1.0;
@@ -161,6 +161,4 @@ fn main() {
                 .chain(),
         )
         .run();
-
-    // simulation_handle.join().unwrap();
 }
