@@ -2953,7 +2953,7 @@ dependencies = [
  "presser",
  "thiserror",
  "winapi",
- "windows 0.51.1",
+ "windows 0.52.0",
 ]
 
 [[package]]
@@ -4445,6 +4445,10 @@ dependencies = [
  "num-traits",
  "slotmap",
 ]
+
+[[package]]
+name = "taulunen"
+version = "0.1.0"
 
 [[package]]
 name = "termcolor"
